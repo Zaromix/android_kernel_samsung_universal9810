@@ -84,57 +84,24 @@ int panel_do_poc_seqtbl_by_index(struct panel_poc_device *poc_dev, int index)
 
 	return ret;
 }
-static struct seqinfo *find_poc_seqtbl_by_index(struct panel_poc_device *poc_dev, u32 index)
-{
-	struct seqinfo *tbl;
-
-	if (unlikely(!poc_dev->seqtbl)) {
-		panel_err("%s, seqtbl not exist\n", __func__);
-		return NULL;
-	}
-
-	if (unlikely(index >= MAX_POC_SEQ)) {
-		panel_err("%s, invalid paramter (index %d)\n",
-				__func__, index);
-		return NULL;
-	}
-
-	tbl = &poc_dev->seqtbl[index];
-	if (tbl != NULL)
-		pr_debug("%s, found %s panel seqtbl\n", __func__, tbl->name);
-
-	return tbl;
-}
-
-static bool panel_poc_seq_exist(struct panel_poc_device *poc_dev, u32 index)
-{
-	struct seqinfo *tbl;
-
-	tbl = find_poc_seqtbl_by_index(poc_dev, index);
-	if (tbl == NULL || tbl->cmdtbl == NULL || tbl->size == 0)
-		return false;
-
-	return true;
-}
 
 int poc_erase(struct panel_device *panel, int addr, int len)
 {
 	struct panel_poc_device *poc_dev = &panel->poc_dev;
 	struct panel_poc_info *poc_info = &poc_dev->poc_info;
-	int ret, sz_block = 0, erased_size = 0, erase_seq_index;
+	int ret, i, count;
+
+	pr_info("%s poc erase +++, 0x%x, %d\n", __func__, addr, len);
 
 	if (addr % POC_PAGE > 0) {
 		pr_err("%s, failed to start erase. invalid addr\n", __func__);
 		return -EINVAL;
 	}
 
-	if (len < 0 || addr + len > get_poc_partition_size(poc_dev, POC_IMG_PARTITION)) {
+	if (len < 0 || addr + len > POC_IMG_SIZE) {
 		pr_err("%s, failed to start erase. range exceeded\n", __func__);
 		return -EINVAL;
 	}
-	len = ALIGN(len, SZ_4K);
-
-	pr_info("%s poc erase +++, 0x%x, %d\n", __func__, addr, len);
 
 	mutex_lock(&panel->op_lock);
 	ret = panel_do_poc_seqtbl_by_index_nolock(poc_dev, POC_ERASE_ENTER_SEQ);
@@ -142,36 +109,26 @@ int poc_erase(struct panel_device *panel, int addr, int len)
 		pr_err("%s, failed to poc-erase-enter-seq\n", __func__);
 		goto out_poc_erase;
 	}
-	while (len > erased_size) {
-		if ((len >= erased_size + SZ_64K) &&
-				panel_poc_seq_exist(poc_dev, POC_ERASE_64K_SEQ)) {
-			erase_seq_index = POC_ERASE_64K_SEQ;
-			sz_block = SZ_64K;
-		} else if ((len >= erased_size + SZ_32K) &&
-				panel_poc_seq_exist(poc_dev, POC_ERASE_32K_SEQ)) {
-			erase_seq_index = POC_ERASE_32K_SEQ;
-			sz_block = SZ_32K;
-		} else {
-			erase_seq_index = POC_ERASE_4K_SEQ;
-			sz_block = SZ_4K;
-		}
 
-		poc_info->waddr = addr + erased_size;
-		ret = panel_do_poc_seqtbl_by_index_nolock(poc_dev, erase_seq_index);
+	count = len / POC_PAGE;
+	if (len % POC_PAGE)
+		count += 1;
+	
+	for (i = 0; i < count; i++) {
+		poc_info->waddr = addr + i * POC_PAGE;
+		ret = panel_do_poc_seqtbl_by_index_nolock(poc_dev, POC_ERASE_SEQ);
 		if (unlikely(ret < 0)) {
-			pr_err("%s, failed to poc-erase-seq 0x%x\n", __func__, addr + erased_size);
+			pr_err("%s, failed to poc-erase-seq 0x%x\n", __func__, i * POC_PAGE + addr);
 			goto out_poc_erase;
 		}
-		pr_info("%s erased addr %06X, sz_block %06X\n",
-				__func__, addr + erased_size, sz_block);
-
+		if (i % 4 == 0)
+			pr_info("%s erased addr %06X\n", __func__, i * POC_PAGE + addr);
+		
 		if (atomic_read(&poc_dev->cancel)) {
-			pr_err("%s, stopped by user at erase 0x%x\n", __func__, erased_size);
+			pr_err("%s, stopped by user at erase 0x%x\n", __func__, i * POC_PAGE);
 			goto cancel_poc_erase;
 		}
-		erased_size += sz_block;
 	}
-
 	ret = panel_do_poc_seqtbl_by_index_nolock(poc_dev, POC_ERASE_EXIT_SEQ);
 	if (unlikely(ret < 0)) {
 		pr_err("%s, failed to poc-erase-exit-seq\n", __func__);
@@ -273,11 +230,6 @@ int poc_write_data(struct panel_device *panel, u8 *data, u32 addr, u32 size)
 	int i, ret = 0;
 	u32 poc_addr;
 
-	if (addr % POC_PAGE > 0) {
-		pr_err("%s, failed to start write. invalid addr\n", __func__);
-		return -EINVAL;
-	}
-
 	mutex_lock(&panel->op_lock);
 	ret = panel_do_poc_seqtbl_by_index_nolock(poc_dev, POC_WRITE_ENTER_SEQ);
 	if (unlikely(ret < 0)) {
@@ -302,13 +254,7 @@ int poc_write_data(struct panel_device *panel, u8 *data, u32 addr, u32 size)
 		}
 
 		poc_info->wdata = data[i];
-		if (i == 0 || i == (size - 1) || (poc_addr & 0xFF) == 0 || (poc_addr & 0xFF) == 0xFF) {
-			ret = panel_do_poc_seqtbl_by_index_nolock(poc_dev, POC_WRITE_DAT_STT_END_SEQ);
-		}
-		else {
-			ret = panel_do_poc_seqtbl_by_index_nolock(poc_dev, POC_WRITE_DAT_SEQ);
-		}
-
+		ret = panel_do_poc_seqtbl_by_index_nolock(poc_dev, POC_WRITE_DAT_SEQ);
 		if (unlikely(ret < 0)) {
 			pr_err("%s, failed to write poc-wr-img seq\n", __func__);
 			goto out_poc_write;
@@ -948,7 +894,6 @@ static ssize_t panel_poc_read(struct file *file, char __user *buf, size_t count,
 	struct panel_poc_info *poc_info = &poc_dev->poc_info;
 	struct panel_device *panel = to_panel_device(poc_dev);
 	ssize_t res;
-	int partition_size;
 
 	panel_info("%s : size : %d, ppos %d\n", __func__, (int)count, (int)*ppos);
 
@@ -965,11 +910,7 @@ static ssize_t panel_poc_read(struct file *file, char __user *buf, size_t count,
 		return -EINVAL;
 	}
 
-	partition_size = get_poc_partition_size(poc_dev, POC_IMG_PARTITION);
-	if (partition_size < 0)
-		return -EINVAL;
-	
-	if (unlikely(*ppos < 0 || *ppos >= partition_size)) {
+	if (unlikely(*ppos < 0 || *ppos >= poc_info->total_size)) {
 		panel_err("POC:ERR:%s: invalid read pos %d\n",
 				__func__, (int)*ppos);
 		return -EINVAL;
@@ -978,11 +919,10 @@ static ssize_t panel_poc_read(struct file *file, char __user *buf, size_t count,
 	mutex_lock(&panel->io_lock);
 	poc_info->rbuf = poc_rd_img;
 	poc_info->rpos = *ppos;
-	if (count > partition_size - *ppos) {
+	if (count > poc_info->total_size - *ppos) {
 		panel_warn("POC:WARN:%s: adjust count %d -> %d\n",
-				__func__, (int)count, (int)(partition_size - *ppos));
-		count = partition_size - *ppos;
-
+				__func__, (int)count, (int)(poc_info->total_size - *ppos));
+		count = poc_info->total_size - *ppos;
 	}
 	poc_info->rsize = (u32)count;
 
@@ -991,7 +931,7 @@ static ssize_t panel_poc_read(struct file *file, char __user *buf, size_t count,
 		goto err_read;
 
 	res = simple_read_from_buffer(buf, poc_info->rsize,
-			ppos, poc_info->rbuf, partition_size);
+			ppos, poc_info->rbuf, poc_info->total_size);
 	if (res < 0)
 		goto err_read;
 
@@ -1009,7 +949,6 @@ static ssize_t panel_poc_write(struct file *file, const char __user *buf,
 	struct panel_poc_info *poc_info = &poc_dev->poc_info;
 	struct panel_device *panel = to_panel_device(poc_dev);
 	ssize_t res;
-	int partition_size;
 
 	panel_info("%s : size : %d, ppos %d\n", __func__, (int)count, (int)*ppos);
 
@@ -1026,28 +965,29 @@ static ssize_t panel_poc_write(struct file *file, const char __user *buf,
 		return -EINVAL;
 	}
 
-	partition_size = get_poc_partition_size(poc_dev, POC_IMG_PARTITION);
-	if (partition_size < 0)
-		return -EINVAL;
-	
-	if (unlikely(*ppos < 0 || *ppos >= partition_size)) {
+	if (unlikely(*ppos < 0 || *ppos >= poc_info->total_size)) {
 		panel_err("POC:ERR:%s: invalid write size pos %d, size %d\n",
 				__func__, (int)*ppos, (int)count);
 		return -EINVAL;
 	}
 
 	mutex_lock(&panel->io_lock);
+	if (*ppos == 0) {
+		res = set_panel_poc(poc_dev, POC_OP_ERASE, NULL);
+		if (res)
+			goto err_write;
+	}
 
 	poc_info->wbuf = poc_wr_img;
 	poc_info->wpos = *ppos;
-	if (count > partition_size - *ppos) {
+	if (count > poc_info->total_size - *ppos) {
 		panel_warn("POC:WARN:%s: adjust count %d -> %d\n",
-				__func__, (int)count, (int)(partition_size - *ppos));
-		count = partition_size - *ppos;
+				__func__, (int)count, (int)(poc_info->total_size - *ppos));
+		count = poc_info->total_size - *ppos;
 	}
 	poc_info->wsize = (u32)count;
 
-	res = simple_write_to_buffer(poc_info->wbuf, partition_size,
+	res = simple_write_to_buffer(poc_info->wbuf, poc_info->total_size,
 			ppos, buf, poc_info->wsize);
 	if (res < 0)
 		goto err_write;
