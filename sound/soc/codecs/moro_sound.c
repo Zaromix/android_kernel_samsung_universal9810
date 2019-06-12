@@ -28,7 +28,7 @@ static int first;
 static int moro_sound = 0;
 
 static int headphone_gain_l, headphone_gain_r;
-static int earpiece_gain, speaker_gain;
+static int earpiece_gain;
 static int out2l_mix_source, out2r_mix_source;
 static int eq1_mix_source, eq2_mix_source;
 
@@ -292,8 +292,6 @@ static void reset_moro_sound(void)
 
 	earpiece_gain = EARPIECE_DEFAULT;
 
-	speaker_gain = SPEAKER_DEFAULT;
-
 	out2l_mix_source = OUT2L_MIX_DEFAULT;
 	out2r_mix_source = OUT2R_MIX_DEFAULT;
 
@@ -308,8 +306,6 @@ static void reset_audio_hub(void)
 	set_headphone_gain_r(HEADPHONE_DEFAULT);
 
 	set_earpiece_gain(EARPIECE_DEFAULT);
-
-	set_speaker_gain(SPEAKER_DEFAULT);
 
 	set_out2l_mix_source(OUT2L_MIX_DEFAULT);
 	set_out2r_mix_source(OUT2R_MIX_DEFAULT);
@@ -326,8 +322,6 @@ static void update_audio_hub(void)
 	set_headphone_gain_r(headphone_gain_r);
 
 	set_earpiece_gain(earpiece_gain);
-
-	set_speaker_gain(speaker_gain);
 
 	set_out2l_mix_source(out2l_mix_source);
 	set_out2r_mix_source(out2r_mix_source);
@@ -451,39 +445,6 @@ static ssize_t earpiece_limits_show(struct device *dev, struct device_attribute 
 {
 	// return version information
 	return sprintf(buf, "Min: %d Max: %d Def:%d\n", EARPIECE_MIN, EARPIECE_MAX, EARPIECE_DEFAULT);
-}
-
-
-/* Speaker Volume */
-
-static ssize_t speaker_gain_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%d\n", speaker_gain);
-}
-
-static ssize_t speaker_gain_store(struct device *dev, struct device_attribute *attr,
-					const char *buf, size_t count)
-{
-	int val;
-
-	if (sscanf(buf, "%d", &val) < 1)
-		return -EINVAL;
-
-	if (val < SPEAKER_MIN)
-		val = SPEAKER_MIN;
-
-	if (val > SPEAKER_MAX)
-		val = SPEAKER_MAX;
-
-	speaker_gain = val;
-	set_speaker_gain(speaker_gain);
-
-	return count;
-}
-
-static ssize_t speaker_limits_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf, "Min: %d Max: %d Def:%d\n", SPEAKER_MIN, SPEAKER_MAX, SPEAKER_DEFAULT);
 }
 
 /* EQ */
@@ -702,7 +663,6 @@ static ssize_t reg_dump_show(struct device *dev, struct device_attribute *attr, 
 headphone_gain_l: reg: %d, variable: %d \
 headphone_gain_r: reg: %d, variable: %d \
 earpiece_gain: %d \
-speaker_gain: %d \
 HPOUT Enabled: %d \
 HPOUT2L Source: %d \
 HPOUT2R Source: %d \
@@ -722,7 +682,6 @@ headphone_gain_l,
 headphone_gain_r,
 first,
 get_earpiece_gain(),
-get_speaker_gain(),
 out2_ena,
 out2l_mix,
 out2r_mix,
@@ -749,8 +708,6 @@ static DEVICE_ATTR(headphone_gain, 0664, headphone_gain_show, headphone_gain_sto
 static DEVICE_ATTR(headphone_limits, 0664, headphone_limits_show, NULL);
 static DEVICE_ATTR(earpiece_gain, 0664, earpiece_gain_show, earpiece_gain_store);
 static DEVICE_ATTR(earpiece_limits, 0664, earpiece_limits_show, NULL);
-static DEVICE_ATTR(speaker_gain, 0664, speaker_gain_show, speaker_gain_store);
-static DEVICE_ATTR(speaker_limits, 0664, speaker_limits_show, NULL);
 static DEVICE_ATTR(eq, 0664, eq_show, eq_store);
 static DEVICE_ATTR(eq_gains, 0664, eq_gains_show, eq_gains_store);
 static DEVICE_ATTR(eq_b1_gain, 0664, eq_b1_gain_show, eq_b1_gain_store);
@@ -767,8 +724,6 @@ static struct attribute *moro_sound_attributes[] = {
 	&dev_attr_headphone_limits.attr,
 	&dev_attr_earpiece_gain.attr,
 	&dev_attr_earpiece_limits.attr,
-	&dev_attr_speaker_gain.attr,
-	&dev_attr_speaker_limits.attr,
 	&dev_attr_eq.attr,
 	&dev_attr_eq_gains.attr,
 	&dev_attr_eq_b1_gain.attr,
