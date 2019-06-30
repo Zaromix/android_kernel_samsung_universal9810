@@ -885,7 +885,9 @@ void sec_ts_print_info(struct sec_ts_data *ts)
 			ts->tdata->tclm_string[ts->tdata->nvdata.cal_position].f_name,
 			(ts->tdata->tclm_level == TCLM_LEVEL_LOCKDOWN) ? ".L" : " ",
 			ts->pressure_cal_base, ts->pressure_cal_delta,
+#ifdef CONFIG_EPEN_WACOM_W9018
 			ts->spen_mode_val, ts->evt_info, ts->tspid_val, ts->tspicid_val,
+#endif
 			ts->print_info_cnt_open, ts->print_info_cnt_release);
 }
 
